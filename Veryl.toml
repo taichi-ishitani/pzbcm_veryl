@@ -1,0 +1,9 @@
+[project]
+name = "pzbcm_veryl"
+version = "0.1.0"
+
+[build]
+filelist_type = "flgen"
+
+[format]
+indent_width = 2
