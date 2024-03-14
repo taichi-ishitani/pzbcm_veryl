@@ -1,11 +1,11 @@
 pub module pzbcm_ram #(
-  parameter WORD_SIZE:      u32       = 8,
-  parameter ADDRESS_WIDTH:  u32       = if WORD_SIZE >: 1 { $clog2(WORD_SIZE) } else { 1 },
-  parameter DATA_WIDTH:     u32       = 8,
-  parameter DATA_TYPE:      type      = logic<DATA_WIDTH>,
-  parameter BUFFER_OUT:     bit       = 0,
-  parameter USE_RESET:      bit       = 0,
-  parameter INITIAL_VALUE:  DATA_TYPE = 0 as DATA_TYPE
+  param WORD_SIZE:      u32       = 8,
+  param ADDRESS_WIDTH:  u32       = if WORD_SIZE >: 1 { $clog2(WORD_SIZE) } else { 1 },
+  param DATA_WIDTH:     u32       = 8,
+  param DATA_TYPE:      type      = logic<DATA_WIDTH>,
+  param BUFFER_OUT:     bit       = 0,
+  param USE_RESET:      bit       = 0,
+  param INITIAL_VALUE:  DATA_TYPE = 0 as DATA_TYPE
 )(
   i_clk:    input   logic,
   i_rst_n:  input   logic,
@@ -51,8 +51,7 @@ pub module pzbcm_ram #(
     always_comb {
       q = ram[i_adrb];
     }
-  }
-  else if USE_RESET {
+  } else if USE_RESET {
     always_ff (i_clk, i_rst_n) {
       if_reset {
         q = INITIAL_VALUE;
@@ -62,8 +61,7 @@ pub module pzbcm_ram #(
         q = ram[i_adrb];
       }
     }
-  }
-  else {
+  } else {
     always_ff (i_clk) {
       if i_meb {
         q = ram[i_adrb];
