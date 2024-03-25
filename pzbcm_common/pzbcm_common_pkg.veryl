@@ -1,0 +1,12 @@
+package pzbcm_common_pkg {
+  function calc_width(
+    n:              input u32,
+    tyepdef_width:  input bit
+  ) -> u32 {
+    if (n <= 1) && tyepdef_width {
+      return 1;
+    } else {
+      return $clog2(n);
+    }
+  }
+}

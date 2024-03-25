@@ -1,6 +1,8 @@
+import pzbcm_common_pkg::*;
+
 pub module pzbcm_ram #(
   param WORD_SIZE:      u32       = 8,
-  param ADDRESS_WIDTH:  u32       = if WORD_SIZE >: 1 { $clog2(WORD_SIZE) } else { 1 },
+  param ADDRESS_WIDTH:  u32       = calc_width(WORD_SIZE, 1),
   param DATA_WIDTH:     u32       = 8,
   param DATA_TYPE:      type      = logic<DATA_WIDTH>,
   param BUFFER_OUT:     bit       = 0,

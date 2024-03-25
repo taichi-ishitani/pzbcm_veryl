@@ -1,0 +1,139 @@
+import pzbcm_common_pkg::calc_width;
+import pzbcm_fifo_pkg::*;
+
+pub module pzbcm_fifo #(
+  param WIDTH:              u32   = 8,
+  param TYPE:               type  = logic<WIDTH>,
+  param DEPTH:              u32   = 8,
+  param THRESHOLD:          u32   = DEPTH,
+  param FLAG_FF_OUT:        bit   = 1,
+  param DATA_FF_OUT:        bit   = 1,
+  param RESET_RAM:          bit   = 0,
+  param RESET_DATA_FF:      bit   = 1,
+  param CLEAR_DATA:         bit   = 0,
+  param PUSH_ON_CLEAR:      bit   = 0,
+  param MATCH_COUNT_WIDTH:  u32   = 0,
+  param COUNTER:            type  = logic<$clog2(DEPTH+1)>
+)(
+  i_clk:          input   logic,
+  i_rst_n:        input   logic,
+  i_clear:        input   logic,
+  o_empty:        output  logic,
+  o_almost_full:  output  logic,
+  o_full:         output  logic,
+  o_word_count:   output  COUNTER,
+  i_push:         input   logic,
+  i_data:         input   TYPE,
+  i_pop:          input   logic,
+  o_data:         output  TYPE
+){
+  local RAM_WORDS:      u32 = get_ram_words(DEPTH, DATA_FF_OUT);
+  local POINTER_WIDTH:  u32 = calc_ram_pointer_width(DEPTH, DATA_FF_OUT);
+
+  var clear_data:     logic;
+  var wp:             logic<POINTER_WIDTH>;
+  var write_to_ff:    logic;
+  var write_to_ram:   logic;
+  var rp:             logic<POINTER_WIDTH>;
+  var read_from_ram:  logic;
+  var ram_read_data:  TYPE;
+  var data_out:       TYPE;
+
+  always_comb {
+    clear_data  = CLEAR_DATA && i_clear;
+  }
+
+//--------------------------------------------------------------
+//  controller
+//--------------------------------------------------------------
+  inst u_controller: pzbcm_fifo_controller #(
+    TYPE:               TYPE,
+    DEPTH:              DEPTH,
+    THRESHOLD:          THRESHOLD,
+    FLAG_FF_OUT:        FLAG_FF_OUT,
+    DATA_FF_OUT:        DATA_FF_OUT,
+    PUSH_ON_CLEAR:      PUSH_ON_CLEAR,
+    RAM_WORDS:          RAM_WORDS,
+    RAM_POINTER_WIDTH:  POINTER_WIDTH,
+    MATCH_COUNT_WIDTH:  MATCH_COUNT_WIDTH
+  )(
+    i_clk:            i_clk,
+    i_rst_n:          i_rst_n,
+    i_clear:          i_clear,
+    o_empty:          o_empty,
+    o_almost_full:    o_almost_full,
+    o_full:           o_full,
+    o_word_count:     o_word_count,
+    i_push:           i_push,
+    i_data:           i_data,
+    i_pop:            i_pop,
+    o_write_pointer:  wp,
+    o_write_to_ff:    write_to_ff,
+    o_write_to_ram:   write_to_ram,
+    o_read_pointer:   rp,
+    o_read_from_ram:  read_from_ram
+  );
+
+//--------------------------------------------------------------
+//  RAM
+//--------------------------------------------------------------
+  if RAM_WORDS >= 1 : g_ram {
+    inst u_ram: pzbcm_ram #(
+      WORD_SIZE:      RAM_WORDS,
+      ADDRESS_WIDTH:  POINTER_WIDTH,
+      DATA_TYPE:      TYPE,
+      BUFFER_OUT:     0,
+      USE_RESET:      RESET_RAM
+    )(
+      i_clk:  i_clk,
+      i_rst_n:  i_rst_n,
+      i_clr:    clear_data,
+      i_mea:    write_to_ram,
+      i_wea:    write_to_ram,
+      i_adra:   wp,
+      i_da:     i_data,
+      i_meb:    read_from_ram,
+      i_adrb:   rp,
+      o_dq:     ram_read_data
+    );
+  } else {
+    always_comb {
+      ram_read_data = 0 as TYPE;
+    }
+  }
+
+//--------------------------------------------------------------
+//  output
+//--------------------------------------------------------------
+  always_comb {
+    o_data  = data_out;
+  }
+
+  if !DATA_FF_OUT :g_output {
+    always_comb {
+      data_out  = ram_read_data;
+    }
+  } else if RESET_DATA_FF {
+    always_ff (i_clk, i_rst_n) {
+      if_reset {
+        data_out  = 0 as TYPE;
+      } else if clear_data {
+        data_out  = 0 as TYPE;
+      } else if write_to_ff {
+        data_out  = i_data;
+      } else if read_from_ram {
+        data_out  = ram_read_data;
+      }
+    }
+  } else {
+    always_ff (i_clk) {
+      if clear_data {
+        data_out  = 0 as TYPE;
+      } else if write_to_ff {
+        data_out  = i_data;
+      } else if read_from_ram {
+        data_out  = ram_read_data;
+      }
+    }
+  }
+}

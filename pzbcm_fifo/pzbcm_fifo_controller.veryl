@@ -1,0 +1,329 @@
+import pzbcm_common_pkg::calc_width;
+import pzbcm_fifo_pkg::*;
+
+pub module pzbcm_fifo_controller #(
+  param TYPE:                 type  = logic,
+  param DEPTH:                u32   = 8,
+  param THRESHOLD:            u32   = DEPTH,
+  param FLAG_FF_OUT:          bit   = 1,
+  param DATA_FF_OUT:          bit   = 1,
+  param PUSH_ON_CLEAR:        bit   = 0,
+  param RAM_WORDS:            u32   = get_ram_words(DEPTH, DATA_FF_OUT),
+  param RAM_POINTER_WIDTH:    u32   = calc_ram_pointer_width(DEPTH, DATA_FF_OUT),
+  param MATCH_COUNTER_WIDTH:  u32   = 0,
+  local RAM_POINTER:          type  = logic<RAM_POINTER_WIDTH>,
+  local POINTER_WIDTH:        u32   = calc_width(DEPTH, 1),
+  local POINTER:              type  = logic<POINTER_WIDTH>,
+  local COUNTER:              type  = logic<$clog2(DEPTH+1)>
+)(
+  i_clk:            input   logic,
+  i_rst_n:          input   logic,
+  i_clear:          input   logic,
+  o_empty:          output  logic,
+  o_almost_full:    output  logic,
+  o_full:           output  logic,
+  o_word_count:     output  COUNTER,
+  i_push:           input   logic,
+  i_data:           input   TYPE,
+  i_pop:            input   logic,
+  o_write_pointer:  output  RAM_POINTER,
+  o_write_to_ff:    output  logic,
+  o_write_to_ram:   output  logic,
+  o_read_pointer:   output  RAM_POINTER,
+  o_read_from_ram:  output  logic
+){
+  struct pzbcm_fifo_status {
+    empty:        logic,
+    almost_full:  logic,
+    full:         logic
+  }
+
+  var push:               logic;
+  var pop:                logic;
+  var clear:              logic<2>;
+  var update_state:       logic;
+  var word_counter:       COUNTER;
+  var word_counter_next:  COUNTER;
+  var word_counter_eq_1:  logic;
+  var word_counter_eq_2:  logic;
+  var word_counter_ge_2:  logic;
+  var status:             pzbcm_fifo_status;
+  var write_to_ff:        logic;
+  var write_to_ram:       logic;
+  var write_ram_pointer:  RAM_POINTER;
+  var read_from_ram:      logic;
+  var read_ram_pointer:   RAM_POINTER;
+  var ram_empty_next:     logic;
+  var match_data:         logic;
+  var last_pop_data:      logic;
+
+  always_comb {
+    push  = i_push && ((PUSH_ON_CLEAR && i_clear) || ((!status.full) || (!match_data)));
+    pop   = i_pop && (!status.empty) && last_pop_data;
+  }
+
+  always_comb {
+    if PUSH_ON_CLEAR {
+      clear[0]  = i_clear && (push == '0);
+      clear[1]  = i_clear && (push == '1);
+    } else {
+      clear[0]  = i_clear;
+      clear[1]  = '0;
+    }
+  }
+
+  always_comb {
+    update_state  = push || pop || i_clear;
+  }
+
+//--------------------------------------------------------------
+//  word counter
+//--------------------------------------------------------------
+  always_comb {
+    o_word_count  = word_counter;
+  }
+
+  always_comb {
+    word_counter_eq_1 = (DEPTH >= 1) && (word_counter == (1 as COUNTER));
+    word_counter_eq_2 = (DEPTH >= 2) && (word_counter == (2 as COUNTER));
+    word_counter_ge_2 = (DEPTH >= 2) && (word_counter >= (2 as COUNTER));
+  }
+
+  always_comb {
+    if clear[0] {
+      word_counter_next = 0 as COUNTER;
+    } else if clear[1] {
+      word_counter_next = 1 as COUNTER;
+    } else if push && (!pop) {
+      word_counter_next = word_counter + (1 as COUNTER);
+    } else if (!push) && pop {
+      word_counter_next = word_counter - (1 as COUNTER);
+    } else {
+      word_counter_next = word_counter;
+    }
+  }
+
+  always_ff (i_clk, i_rst_n) {
+    if_reset {
+      word_counter  = 0;
+    } else if update_state {
+      word_counter  = word_counter_next;
+    }
+  }
+
+//--------------------------------------------------------------
+//  status
+//--------------------------------------------------------------
+  always_comb {
+    o_empty       = status.empty;
+    o_almost_full = status.almost_full;
+    o_full        = status.full && (!match_data);
+  }
+
+  if FLAG_FF_OUT : g_status {
+    always_ff (i_clk, i_rst_n) {
+      if_reset {
+        status  = get_initial_state();
+      } else if update_state {
+        status  = get_status(word_counter_next);
+      }
+    }
+  } else {
+    always_comb {
+      status  = get_status(word_counter);
+    }
+  }
+
+  function get_initial_state()
+    -> pzbcm_fifo_status {
+      var status: pzbcm_fifo_status;
+      status.empty        = '1;
+      status.almost_full  = '0;
+      status.full         = '0;
+      return status;
+    }
+
+  function get_status(
+    word_counter: input COUNTER
+  ) -> pzbcm_fifo_status {
+    var status: pzbcm_fifo_status;
+
+    status.empty        = word_counter == (0 as COUNTER);
+    status.almost_full  = word_counter >= (THRESHOLD as COUNTER);
+    status.full         = word_counter == (DEPTH as COUNTER);
+
+    return status;
+  }
+
+//--------------------------------------------------------------
+//  pointer
+//--------------------------------------------------------------
+  always_comb {
+    o_write_pointer = write_ram_pointer;
+    o_write_to_ff   = write_to_ff;
+    o_write_to_ram  = write_to_ram;
+    o_read_pointer  = read_ram_pointer;
+    o_read_from_ram = read_from_ram;
+  }
+
+  if DATA_FF_OUT : g_access_control {
+    always_comb {
+      if (word_counter_eq_1 && pop) || status.empty || clear[1] {
+        write_to_ff   = '1;
+        write_to_ram  = '0;
+      } else {
+        write_to_ff   = '0;
+        write_to_ram  = push;
+      }
+      read_from_ram   = pop && word_counter_ge_2;
+      ram_empty_next  = read_from_ram && (!write_to_ram) && word_counter_eq_2;
+    }
+  } else {
+    always_comb {
+      write_to_ff     = '0;
+      write_to_ram    = push;
+      read_from_ram   = pop;
+      ram_empty_next  = read_from_ram && (!write_to_ram) && word_counter_eq_1;
+    }
+  }
+
+  if RAM_WORDS >= 2 : g_ram_pointer {
+    always_ff (i_clk, i_rst_n) {
+      if_reset {
+        write_ram_pointer = 0 as RAM_POINTER;
+      } else if clear[0] || (DATA_FF_OUT && clear[1]) {
+        write_ram_pointer = 0 as RAM_POINTER;
+      } else if clear[1] {
+        write_ram_pointer = 1 as RAM_POINTER;
+      } else if ram_empty_next {
+        write_ram_pointer = read_ram_pointer;
+      } else if write_to_ram {
+        if write_ram_pointer == ((RAM_WORDS - 1) as RAM_POINTER) {
+          write_ram_pointer = 0 as RAM_POINTER;
+        } else {
+          write_ram_pointer += 1 as RAM_POINTER;
+        }
+      }
+    }
+
+    always_ff (i_clk, i_rst_n) {
+      if_reset {
+        read_ram_pointer  = 0 as RAM_POINTER;
+      } else if (i_clear) {
+        read_ram_pointer  = 0 as RAM_POINTER;
+      } else if (!ram_empty_next) && read_from_ram {
+        if read_ram_pointer == ((RAM_WORDS - 1) as RAM_POINTER) {
+          read_ram_pointer  = 0 as RAM_POINTER;
+        } else {
+          read_ram_pointer  += 1 as RAM_POINTER;
+        }
+      }
+    }
+  } else {
+    always_comb {
+      write_ram_pointer = 0 as RAM_POINTER;
+      read_ram_pointer  = 0 as RAM_POINTER;
+    }
+  }
+
+  if MATCH_COUNTER_WIDTH >: 0 : g_data_match {
+    var match_count:      logic<DEPTH, MATCH_COUNTER_WIDTH>;
+    var match_count_full: logic<DEPTH>;
+    var match_count_eq_1: logic<DEPTH>;
+    var last_match_data:  logic<DEPTH>;
+    var wp:               POINTER<2>;
+    var rp:               POINTER;
+    var data:             TYPE;
+
+    always_comb {
+      if wp[0] == (0 as POINTER) {
+        wp[1] = (DEPTH - 1) as POINTER;
+      } else {
+        wp[1] = wp[0] - (1 as POINTER);
+      }
+    }
+
+    if DEPTH == RAM_WORDS : g_pointer {
+      always_comb {
+        wp[0] = write_ram_pointer;
+        rp    = read_ram_pointer;
+      }
+    } else {
+      always_ff (i_clk, i_rst_n) {
+        if_reset {
+          wp[0] = 0 as POINTER;
+        } else if clear[0] {
+          wp[0] = 0 as POINTER;
+        } else if clear[1] {
+          wp[0] = 1 as POINTER;
+        } else if push {
+          if wp[0] == ((DEPTH - 1) as POINTER) {
+            wp[0] = 0 as POINTER;
+          } else {
+            wp[0] += 1 as POINTER;
+          }
+        }
+      }
+
+      always_ff (i_clk, i_rst_n) {
+        if_reset {
+          rp  = 0 as POINTER;
+        } else if i_clear {
+          rp  = 0 as POINTER;
+        } else if pop {
+          if rp == ((DEPTH - 1) as POINTER) {
+            rp  = 0 as POINTER;
+          } else {
+            rp  += 1 as POINTER;
+          }
+        }
+      }
+    }
+
+    always_ff (i_clk) {
+      if push {
+        data  = i_data;
+      }
+    }
+
+    always_comb {
+      match_data    = (!status.empty) && (i_data == data) && (!match_count_full);
+      last_pop_data = last_match_data[rp];
+    }
+
+    for i in 0..DEPTH : g_match_count {
+      var up_down:  logic<3>;
+
+      always_comb {
+        match_count_full[i] = match_count[i] == '1;
+        match_count_eq_1[i] = match_count[i] == 1 as MATCH_COUNTER_WIDTH;
+        last_match_data[i]  = match_count_eq_1[i] && (up_down[2:1] == '0);
+      }
+
+      always_comb {
+        up_down[2]  = (match_data == '0) && (wp[0] == (i as POINTER)) && push;
+        up_down[1]  = (match_data == '1) && (wp[1] == (i as POINTER)) && push;
+        up_down[0]  = (!status.empty) && (rp == (i as POINTER)) && i_pop;
+      }
+
+      always_ff (i_clk, i_rst_n) {
+        if_reset {
+          match_count[i]  = 0 as MATCH_COUNTER_WIDTH;
+        } else if clear[0] || (i_clear && (i >= 1)) {
+          match_count[i]  = 0 as MATCH_COUNTER_WIDTH;
+        } else if clear[1] && (i == 0) {
+          match_count[i]  = 1 as MATCH_COUNTER_WIDTH;
+        } else if inside up_down {3'b1x0, 3'bx10} {
+          match_count[i]  += 1 as MATCH_COUNTER_WIDTH;
+        } else if up_down == 3'b001 {
+          match_count[i]  -= 1 as MATCH_COUNTER_WIDTH;
+        }
+      }
+    }
+  } else {
+    always_comb {
+      match_data    = '0;
+      last_pop_data = '1;
+    }
+  }
+}

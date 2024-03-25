@@ -1,0 +1,20 @@
+package pzbcm_fifo_pkg {
+  function get_ram_words(
+    depth:        input u32,
+    data_ff_out:  input bit
+  ) -> u32 {
+    if data_ff_out {
+      return depth - 1;
+    } else {
+      return depth;
+    }
+  }
+
+  function calc_ram_pointer_width(
+    depth:        input u32,
+    data_ff_out:  input bit
+  ) -> u32 {
+    let words:  u32 = get_ram_words(depth, data_ff_out);
+    return pzbcm_common_pkg::calc_width(words, 1);
+  }
+}
