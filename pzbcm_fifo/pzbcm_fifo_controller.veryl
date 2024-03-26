@@ -2,19 +2,19 @@ import pzbcm_common_pkg::calc_width;
 import pzbcm_fifo_pkg::*;
 
 pub module pzbcm_fifo_controller #(
-  param TYPE:                 type  = logic,
-  param DEPTH:                u32   = 8,
-  param THRESHOLD:            u32   = DEPTH,
-  param FLAG_FF_OUT:          bit   = 1,
-  param DATA_FF_OUT:          bit   = 1,
-  param PUSH_ON_CLEAR:        bit   = 0,
-  param RAM_WORDS:            u32   = get_ram_words(DEPTH, DATA_FF_OUT),
-  param RAM_POINTER_WIDTH:    u32   = calc_ram_pointer_width(DEPTH, DATA_FF_OUT),
-  param MATCH_COUNTER_WIDTH:  u32   = 0,
-  local RAM_POINTER:          type  = logic<RAM_POINTER_WIDTH>,
-  local POINTER_WIDTH:        u32   = calc_width(DEPTH, 1),
-  local POINTER:              type  = logic<POINTER_WIDTH>,
-  local COUNTER:              type  = logic<$clog2(DEPTH+1)>
+  param TYPE:               type  = logic,
+  param DEPTH:              u32   = 8,
+  param THRESHOLD:          u32   = DEPTH,
+  param FLAG_FF_OUT:        bit   = 1,
+  param DATA_FF_OUT:        bit   = 1,
+  param PUSH_ON_CLEAR:      bit   = 0,
+  param RAM_WORDS:          u32   = get_ram_words(DEPTH, DATA_FF_OUT),
+  param RAM_POINTER_WIDTH:  u32   = calc_ram_pointer_width(DEPTH, DATA_FF_OUT),
+  param MATCH_COUNT_WIDTH:  u32   = 0,
+  local RAM_POINTER:        type  = logic<RAM_POINTER_WIDTH>,
+  local POINTER_WIDTH:      u32   = calc_width(DEPTH, 1),
+  local POINTER:            type  = logic<POINTER_WIDTH>,
+  local COUNTER:            type  = logic<$clog2(DEPTH+1)>
 )(
   i_clk:            input   logic,
   i_rst_n:          input   logic,
@@ -58,7 +58,7 @@ pub module pzbcm_fifo_controller #(
   var last_pop_data:      logic;
 
   always_comb {
-    push  = i_push && ((PUSH_ON_CLEAR && i_clear) || ((!status.full) || (!match_data)));
+    push  = i_push && ((PUSH_ON_CLEAR && i_clear) || ((!status.full) && (!match_data)));
     pop   = i_pop && (!status.empty) && last_pop_data;
   }
 
@@ -226,8 +226,8 @@ pub module pzbcm_fifo_controller #(
     }
   }
 
-  if MATCH_COUNTER_WIDTH >: 0 : g_data_match {
-    var match_count:      logic<DEPTH, MATCH_COUNTER_WIDTH>;
+  if MATCH_COUNT_WIDTH >: 0 : g_data_match {
+    var match_count:      logic<DEPTH, MATCH_COUNT_WIDTH>;
     var match_count_full: logic<DEPTH>;
     var match_count_eq_1: logic<DEPTH>;
     var last_match_data:  logic<DEPTH>;
@@ -296,7 +296,7 @@ pub module pzbcm_fifo_controller #(
 
       always_comb {
         match_count_full[i] = match_count[i] == '1;
-        match_count_eq_1[i] = match_count[i] == 1 as MATCH_COUNTER_WIDTH;
+        match_count_eq_1[i] = match_count[i] == 1 as MATCH_COUNT_WIDTH;
         last_match_data[i]  = match_count_eq_1[i] && (up_down[2:1] == '0);
       }
 
@@ -308,15 +308,15 @@ pub module pzbcm_fifo_controller #(
 
       always_ff (i_clk, i_rst_n) {
         if_reset {
-          match_count[i]  = 0 as MATCH_COUNTER_WIDTH;
+          match_count[i]  = 0 as MATCH_COUNT_WIDTH;
         } else if clear[0] || (i_clear && (i >= 1)) {
-          match_count[i]  = 0 as MATCH_COUNTER_WIDTH;
+          match_count[i]  = 0 as MATCH_COUNT_WIDTH;
         } else if clear[1] && (i == 0) {
-          match_count[i]  = 1 as MATCH_COUNTER_WIDTH;
+          match_count[i]  = 1 as MATCH_COUNT_WIDTH;
         } else if inside up_down {3'b1x0, 3'bx10} {
-          match_count[i]  += 1 as MATCH_COUNTER_WIDTH;
+          match_count[i]  += 1 as MATCH_COUNT_WIDTH;
         } else if up_down == 3'b001 {
-          match_count[i]  -= 1 as MATCH_COUNTER_WIDTH;
+          match_count[i]  -= 1 as MATCH_COUNT_WIDTH;
         }
       }
     }
