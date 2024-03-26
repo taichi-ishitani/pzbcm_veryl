@@ -1,0 +1,97 @@
+pub interface pzbcm_min_max_finder #(
+  param ENTRIES:        u32   = 1,
+  param WIDTH:          u32   = 1,
+  param TYPE:           type  = logic<WIDTH>,
+  param RESULT:         type  = logic,
+  param COMPARE_WIDTH:  u32   = $bits(TYPE)
+) {
+  local DEPTH:  u32 = $clog2(ENTRIES);
+
+  struct pzbcm_min_max_finder_result {
+    location: logic<ENTRIES>,
+    data:     TYPE
+  }
+
+  function __do_compare(
+    compare_min:  input bit,
+    lhs:          input TYPE,
+    rhs:          input TYPE
+  ) -> logic<2> {
+    var result: logic;
+
+    if compare_min {
+      result  = lhs[0+:COMPARE_WIDTH] <= rhs[0+:COMPARE_WIDTH];
+    } else {
+      result  = lhs[0+:COMPARE_WIDTH] >= rhs[0+:COMPARE_WIDTH];
+    }
+
+    return if result { 2'b01 } else { 2'b10 };
+  }
+
+  function __find_min_max(
+    compare_min:  input bit,
+    data:         input TYPE<ENTRIES>
+  ) -> RESULT {
+    var stride:           u32;
+    var current_n:        u32;
+    var next_n:           u32;
+    var current_location: logic<ENTRIES>;
+    var next_location:    logic<ENTRIES>;
+    var current_data:     TYPE[ENTRIES];
+    var next_data:        TYPE[ENTRIES];
+    var compare_result:   logic<2>;
+    var result:           pzbcm_min_max_finder_result;
+
+    next_n        = ENTRIES;
+    next_location = '1;
+    for i: u32 in 0..ENTRIES {
+      next_data[i]  = data[i];
+    }
+
+    for i: u32 in 0..DEPTH {
+      current_n         = next_n;
+      current_location  = next_location;
+      current_data      = next_data;
+
+      next_n  = (current_n / 2) + (current_n % 2);
+      stride  = 2**i;
+      for j: u32 in 0..next_n {
+        if ((j + 1) == next_n) && ((current_n % 2) == 1) {
+          compare_result  = 2'b01;
+        } else {
+          compare_result  = __do_compare(compare_min, current_data[2*j+0], current_data[2*j+1]);
+        }
+
+        next_data[j]  =
+          if compare_result[0] {
+            current_data[2*j+0]
+          } else {
+            current_data[2*j+1]
+          };
+
+        for k: u32 in 0..(2*stride) {
+          let index:  u32 = 2 * stride * j + k;
+          if index <: ENTRIES {
+            next_location[index]  = compare_result[k/stride] && current_location[index];
+          }
+        }
+      }
+    }
+
+    result.data     = next_data[0];
+    result.location = next_location;
+    return result as RESULT;
+  }
+
+  function find_min(
+    data: input TYPE<ENTRIES>
+  ) -> RESULT {
+    return __find_min_max(1, data);
+  }
+
+  function find_max(
+    data: input TYPE<ENTRIES>
+  ) -> RESULT {
+    return __find_min_max(0, data);
+  }
+}
