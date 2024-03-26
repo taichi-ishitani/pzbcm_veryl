@@ -18,7 +18,7 @@ pub module pzbcm_ram #(
   i_da:     input   DATA_TYPE,
   i_meb:    input   logic,
   i_adrb:   input   logic<ADDRESS_WIDTH>,
-  o_dq:     output  DATA_TYPE
+  o_qb:     output  DATA_TYPE
 ) {
   var ram:  logic<$bits(DATA_TYPE)>[WORD_SIZE];
   var q:    logic<$bits(DATA_TYPE)>;
@@ -46,7 +46,7 @@ pub module pzbcm_ram #(
   }
 
   always_comb {
-    o_dq  = q as DATA_TYPE;
+    o_qb  = q as DATA_TYPE;
   }
 
   if !BUFFER_OUT :g_out {

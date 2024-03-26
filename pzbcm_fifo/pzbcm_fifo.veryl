@@ -94,7 +94,7 @@ pub module pzbcm_fifo #(
       i_da:     i_data,
       i_meb:    read_from_ram,
       i_adrb:   rp,
-      o_dq:     ram_read_data
+      o_qb:     ram_read_data
     );
   } else {
     always_comb {
