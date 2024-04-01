@@ -1,12 +1,25 @@
 package pzbcm_common_pkg {
+  function clip_value(
+    v:    input u32,
+    min:  input u32
+  ) -> u32 {
+    if v >= min {
+      return v;
+    } else {
+      return min;
+    }
+  }
+
   function calc_width(
     n:              input u32,
     tyepdef_width:  input bit
   ) -> u32 {
-    if (n <= 1) && tyepdef_width {
-      return 1;
-    } else {
-      return $clog2(n);
-    }
+    let width:  u32 = $clog2(n);
+    return
+      if tyepdef_width {
+        clip_value(width, 1)
+      } else {
+        width
+      };
   }
 }

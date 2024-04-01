@@ -1,0 +1,93 @@
+pub package pzbcm_arbiter_pkg {
+  local PZBCM_ARBITER_MAX_REQUESTS: u32 = 32;
+  local PZBCM_ARBITER_MAX_PRIORITY: u32 = 255;
+  local PZBCM_ARBITER_MAX_WEIGHT:   u32 = 255;
+
+  local PZBCM_ARBITER_PRIORITY_WIDTH: u32 = $clog2(PZBCM_ARBITER_MAX_PRIORITY + 1);
+  local PZBCM_ARBITER_WEIGHT_WIDTH:   u32 = $clog2(PZBCM_ARBITER_MAX_WEIGHT + 1);
+
+  #[enum_member_prefix(PZBCM_ARBITER)]
+  enum pzbcm_arbiter_type: logic<3> {
+    FIXED_PRIORITY,
+    ROUND_ROBIN,
+    INCREMENTAL_ROUND_ROBIN,
+    DECREMENTAL_ROUND_ROBIN,
+    LRU,
+    MRU
+  }
+
+  type  pzbcm_arbiter_priority      = logic<PZBCM_ARBITER_PRIORITY_WIDTH>;
+  type  pzbcm_arbiter_priority_list = pzbcm_arbiter_priority<PZBCM_ARBITER_MAX_REQUESTS>;
+
+  type  pzbcm_arbiter_weight      = logic<PZBCM_ARBITER_WEIGHT_WIDTH>;
+  type  pzbcm_arbiter_weight_list = pzbcm_arbiter_weight<PZBCM_ARBITER_MAX_REQUESTS>;
+
+  type  pzbcm_arbiter_priority_matrix_row = logic<PZBCM_ARBITER_MAX_REQUESTS>;
+  type  pzbcm_arbiter_priority_matrix     = logic<PZBCM_ARBITER_MAX_REQUESTS, PZBCM_ARBITER_MAX_REQUESTS>;
+
+  struct pzbcm_arbiter_config {
+    arbiter_type:     pzbcm_arbiter_type,
+    reset:            logic,
+    request_priority: pzbcm_arbiter_priority_list,
+    weight_valid:     logic,
+    weight:           pzbcm_arbiter_weight_list,
+    priority_matrix:  pzbcm_arbiter_priority_matrix
+  }
+
+  function calc_grant_width(
+    requests:     input u32,
+    onehot_grant: input bit
+  ) -> u32 {
+    if onehot_grant {
+      return requests;
+    } else {
+      return pzbcm_common_pkg::calc_width(requests, 1);
+    }
+  }
+
+  function create_arbiter_config(
+    arbiter_type:     input pzbcm_arbiter_type,
+    reset:            input logic,
+    request_priority: input pzbcm_arbiter_priority_list,
+    weight_valid:     input logic,
+    weight:           input pzbcm_arbiter_weight_list,
+    priority_matrix:  input pzbcm_arbiter_priority_matrix
+  ) -> pzbcm_arbiter_config {
+    var arbiter_config: pzbcm_arbiter_config;
+    arbiter_config.arbiter_type     = arbiter_type;
+    arbiter_config.reset            = reset;
+    arbiter_config.request_priority = request_priority;
+    arbiter_config.weight_valid     = weight_valid;
+    arbiter_config.weight           = weight;
+    arbiter_config.priority_matrix  = priority_matrix;
+    return arbiter_config;
+  }
+
+  local PZBCM_ARBITER_CONFIG_FIXED_PRIORITY:  pzbcm_arbiter_config  =
+    create_arbiter_config(
+      pzbcm_arbiter_type::FIXED_PRIORITY, //  arbiter type
+      '0,                                 //  reset
+      '0,                                 //  request_priority
+      '0,                                 //  weight_valid
+      '0,                                 //  weight
+      '1                                  //  priority_matrix
+    );
+  local PZBCM_ARBITER_CONFIG_ROUND_ROBIN: pzbcm_arbiter_config  =
+    create_arbiter_config(
+      pzbcm_arbiter_type::ROUND_ROBIN,  //  arbiter type
+      '0,                               //  reset
+      '0,                               //  request_priority
+      '0,                               //  weight_valid
+      '0,                               //  weight
+      '0                                //  priority_matrix
+    );
+  local PZBCM_ARBITER_CONFIG_LRU: pzbcm_arbiter_config  =
+    create_arbiter_config(
+      pzbcm_arbiter_type::LRU,  //  arbiter type
+      '0,                       //  reset
+      '0,                       //  request_priority
+      '0,                       //  weight_valid
+      '0,                       //  weight
+      '1                        //  priority_matrix
+    );
+}

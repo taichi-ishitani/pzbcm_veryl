@@ -1,0 +1,184 @@
+import  pzbcm_arbiter_pkg::*;
+
+module pzbcm_matrix_arbiter #(
+  param REQUESTS:         u32                           = 2,
+  param PRIORITY_MATRIX:  pzbcm_arbiter_priority_matrix = '1,
+  param ONEHOT_GRANT:     bit                           = 1,
+  param GRANT_WIDTH:      u32                           = calc_grant_width(REQUESTS, ONEHOT_GRANT)
+)(
+  i_clk:      input   logic,
+  i_rst_n:    input   logic,
+  i_enable:   input   logic,
+  i_config:   input   pzbcm_arbiter_config,
+  i_request:  input   logic<REQUESTS>,
+  o_grant:    output  logic<GRANT_WIDTH>
+){
+  var request:              logic<REQUESTS>;
+  var grant:                logic<REQUESTS>;
+  var priority_matrix:      logic<REQUESTS, REQUESTS>;
+  var priority_matrix_next: logic<REQUESTS, REQUESTS>;
+
+//--------------------------------------------------------------
+//  Grant generation
+//--------------------------------------------------------------
+  always_comb {
+    o_grant = get_output_grant(grant);
+  }
+
+  function get_output_grant(
+    grant:  input logic<REQUESTS>
+  ) -> logic<GRANT_WIDTH> {
+    var output_grant: logic<GRANT_WIDTH>;
+
+    if ONEHOT_GRANT {
+      output_grant  = grant as GRANT_WIDTH;
+    } else {
+      output_grant  = 0 as GRANT_WIDTH;
+      for i: u32 in 1..REQUESTS {
+        if grant[i] {
+          output_grant  = i as GRANT_WIDTH;
+        }
+      }
+    }
+
+    return output_grant;
+  }
+
+  always_comb {
+    request = i_request & {i_enable repeat REQUESTS};
+    grant   = compute_grant(request, priority_matrix);
+  }
+
+  function compute_grant(
+    request:          input logic<REQUESTS>,
+    priority_matrix:  input logic<REQUESTS, REQUESTS>
+  ) -> logic<REQUESTS> {
+    var grant:          logic<REQUESTS>;
+    var column_vector:  logic<REQUESTS>;
+
+    for column: u32 in 0..REQUESTS {
+      for row: u32 in 0..REQUESTS {
+        column_vector[row]  =
+          (row != column) && request[row] && priority_matrix[row][column];
+      }
+
+      grant[column] = request[column] && (column_vector != '0);
+    }
+
+    return grant;
+  }
+
+//--------------------------------------------------------------
+//  Priority matrix
+//--------------------------------------------------------------
+  always_comb {
+    priority_matrix_next  =
+      update_priority_matrix(i_config.arbiter_type, priority_matrix, grant);
+  }
+
+  for row in 0..REQUESTS : g_row {
+    for column in 0..REQUESTS : g_column {
+      var priority_value: logic;
+
+      always_comb {
+        priority_matrix[row][column]  = priority_value;
+      }
+
+      if column <: row : g {
+        always_comb {
+          priority_value  = ~priority_matrix[column][row];
+        }
+      } else if column == row {
+        always_comb {
+          priority_value  = '0;
+        }
+      } else {
+        always_ff (i_clk, i_rst_n) {
+          if_reset {
+            priority_value  = PRIORITY_MATRIX[row][column];
+          } else if i_config.reset {
+            priority_value  = i_config.priority_matrix[row][column];
+          } else if request != '0 {
+            priority_value  = priority_matrix_next[row][column];
+          }
+        }
+      }
+    }
+  }
+
+  function update_priority_matrix(
+    arbiter_type:     input pzbcm_arbiter_type,
+    priority_matrix:  input logic<REQUESTS, REQUESTS>,
+    grant:            input logic<REQUESTS>
+  ) -> logic<REQUESTS, REQUESTS> {
+    var update_position:  logic<REQUESTS>;
+    var row_value:        logic;
+    var column_value:     logic;
+    var matrix_next:      logic<REQUESTS, REQUESTS>;
+
+    case arbiter_type {
+      pzbcm_arbiter_type::ROUND_ROBIN,
+      pzbcm_arbiter_type::INCREMENTAL_ROUND_ROBIN: {
+        for row: u32 in 0..REQUESTS {
+          update_position[row]  =
+            is_highest_priority(row, priority_matrix[row]);
+        }
+        row_value     = '0;
+        column_value  = '1;
+      }
+      pzbcm_arbiter_type::DECREMENTAL_ROUND_ROBIN: {
+        for row: u32 in 0..REQUESTS {
+          update_position[row]  =
+            is_lowest_priority(priority_matrix[row]);
+        }
+        row_value     = '1;
+        column_value  = '0;
+      }
+      pzbcm_arbiter_type::LRU: {
+        update_position = grant;
+        row_value       = '0;
+        column_value    = '1;
+      }
+      pzbcm_arbiter_type::MRU: {
+        update_position = grant;
+        row_value       = '1;
+        column_value    = '0;
+      }
+      default: {
+        update_position = '0;
+        row_value       = '0;
+        column_value    = '0;
+      }
+    }
+
+    for row: u32 in 0..REQUESTS {
+      for column: u32 in 0..REQUESTS {
+        if update_position[column] {
+          matrix_next[row][column]  = column_value;
+        } else if update_position[row] {
+          matrix_next[row][column]  = row_value;
+        } else {
+          matrix_next[row][column]  = priority_matrix[row][column];
+        }
+      }
+    }
+
+    return matrix_next;
+  }
+
+  function is_highest_priority(
+    row_index:  input u32,
+    row_vector: input logic<REQUESTS>
+  ) -> logic {
+    var vector: logic<REQUESTS>;
+    vector            = row_vector;
+    vector[row_index] = '1;
+    return vector == '1;
+  }
+
+  function is_lowest_priority(
+    row_vector: input logic<REQUESTS>
+  ) -> logic {
+    return row_vector == '0;
+  }
+}

@@ -1,0 +1,45 @@
+import  pzbcm_arbiter_pkg::*;
+
+pub module pzbcm_arbiter #(
+  param REQUESTS:         u32                           = 2,
+  param ONEHOT_GRANT:     bit                           = 1,
+  param ENABLE_ARBITER:   bit<2>                        = '1,
+  param PRIORITY_WIDTH:   u32                           = 0,
+  param WEIGHT_WIDTH:     u32                           = 0,
+  param WEIGHT:           pzbcm_arbiter_weight_list     = '1,
+  param PRIORITY_MATRIX:  pzbcm_arbiter_priority_matrix = '1,
+  param KEEP_RESULT:      bit                           = 1,
+  param GRANT_WIDTH:      u32                           = calc_grant_width(REQUESTS, ONEHOT_GRANT)
+)(
+  i_clk:      input   logic,
+  i_rst_n:    input   logic,
+  i_config:   input   pzbcm_arbiter_config,
+  i_request:  input   logic<REQUESTS>,
+  o_grant:    output  logic<GRANT_WIDTH>,
+  i_free:     input   logic<REQUESTS>
+) {
+  if REQUESTS >= 2 : g {
+    inst u_core: pzbcm_arbiter_core #(
+      REQUESTS:         REQUESTS,
+      ONEHOT_GRANT:     ONEHOT_GRANT,
+      ENABLE_ARBITER:   ENABLE_ARBITER,
+      PRIORITY_WIDTH:   PRIORITY_WIDTH,
+      WEIGHT_WIDTH:     WEIGHT_WIDTH,
+      WEIGHT:           WEIGHT,
+      PRIORITY_MATRIX:  PRIORITY_MATRIX,
+      KEEP_RESULT:      KEEP_RESULT,
+      GRANT_WIDTH:      GRANT_WIDTH
+    )(
+      i_clk:      i_clk,
+      i_rst_n:    i_rst_n,
+      i_config:   i_config,
+      i_request:  i_request,
+      o_grant:    o_grant,
+      i_free:     i_free
+    );
+  } else {
+    always_comb {
+      o_grant = if ONEHOT_GRANT { '1 } else { '0 };
+    }
+  }
+}
